@@ -67,13 +67,15 @@ const addProgressHandler = async(req, res) => {
         const progressId = uuidv4();
         transaction = await sequelize.transaction();
 
-        const uploadPath = 'uploads/progress';
-        if (!fs.existsSync(uploadPath)) {
-            fs.mkdirSync(uploadPath, { recursive: true });
-        }
-
-        const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
-        filePath = `${uploadPath}/${filename}`;
+        const uploadPath = path.join(__dirname, '..', 'public', 'uploads', 'progress');
+                if (!fs.existsSync(uploadPath)) {
+                    fs.mkdirSync(uploadPath, { recursive: true });
+                }
+        
+                // Simpan file sementara sebelum commit transaksi
+                const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
+                const filePath = path.join(uploadPath, filename);
+                const fileUrl = `${req.protocol}://${req.get('host')}/uploads/progress/${filename}`; // Buat URL
         fs.writeFileSync(filePath, req.file.buffer);
 
         const newProgress = await Progress.create({
@@ -84,15 +86,22 @@ const addProgressHandler = async(req, res) => {
             external_technician: external_technician ? external_technician : null,
             description: description,
             documentation: filePath,
+            documentation_url: fileUrl
 
         }, { transaction });
+
+        const updateReport = await Progress.update(
+            { progress_uuid: progressId },
+            { where: {uuid: report_uuid } }
+        )
 
         await transaction.commit();
 
         res.status(201).json({
             message: 'Progress sent successfully',
             progressId: progressId,
-            reportId:  report_uuid
+            reportId:  report_uuid,
+            documentation_url: fileUrl
         })
     } catch (error) {
         if (transaction) await transaction.rollback();
@@ -116,7 +125,7 @@ const getProgressHandler = async (req, res) => {
         const { report_uuid } = req.query;
         
         const queryOptions = {
-            attributes: ['uuid', 'status', 'description', 'external_technician', 'documentation'],
+            attributes: ['uuid', 'status', 'description', 'external_technician', 'documentation', 'documentation_url'],
             include: [
                 {
                     model: Users,
@@ -129,6 +138,7 @@ const getProgressHandler = async (req, res) => {
 
         if (report_uuid) {
             queryOptions.where['report_uuid'] = report_uuid;
+            queryOptions.order = [['created_at', 'DESC']];
         }
 
         const progress = await Progress.findAll(queryOptions);
@@ -144,7 +154,8 @@ const getProgressHandler = async (req, res) => {
             technician_name: progress.Technician ? progress.Technician.name : null,
             external_technician: progress.external_technician,
             description: progress.description,
-            documentation: progress.documentation
+            documentation: progress.documentation,
+            documentation_url: progress.documentation_url,
         }));
         
         res.status(200).json(formattedProgress);

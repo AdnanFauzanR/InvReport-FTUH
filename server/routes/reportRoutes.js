@@ -5,6 +5,7 @@ const {
     uploadReport,
     addReportHandler,
     getReportsHandler,
+    detailReportHandler,
     updateReportHandler,
     deleteReportsHandler,
 } = require('../api/report');
@@ -18,6 +19,8 @@ router.post('/add-report', uploadReport.single('file'), [
 ], validate, addReportHandler);
 
 router.get('/list-report', getReportsHandler);
+
+router.get('/detail-report', detailReportHandler);
 
 router.put('/update-report/:uuid', [
     body('status').notEmpty().withMessage('Status is required')

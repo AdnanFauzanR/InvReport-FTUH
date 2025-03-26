@@ -2,12 +2,13 @@ const pool = require('../config/db');
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { Users } = require('../models')
 
 const isAdmin = async (req, res, next) => {
     try {
         const token = req.header('Authorization').replace('Bearer ', '');
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const result = await pool.query('SELECT division FROM users WHERE id = $1', [decoded.id]);
+        const result = await pool.query('SELECT division FROM users WHERE uuid = $1', [decoded.uuid]);
         const user = result.rows[0];
 
         if (!user || user.division !== 'admin') {
@@ -48,6 +49,23 @@ const getUserHandler = async (req, res) => {
         res.status(500).json({ error: 'Server Error' })
     }
 };
+
+const getUserProfileHandler = async (req, res) => {
+    try {
+        const user = await Users.findOne({
+            attributes: ['uuid', 'name', 'username', 'email', 'division', 'role'],
+            where: { uuid: req.user.uuid}
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.status(200).json(user);
+    } catch (error) {
+        res.status(500).json({ error: 'Internal Server Error', details: error.message})
+    }
+}
 
 const updateUserHandler = async (req, res) => {
     try {
@@ -122,4 +140,9 @@ const deleteUserHandler = async (req, res) => {
     
 }
 
-module.exports = { getUserHandler, updateUserHandler, deleteUserHandler, isAdmin };
+module.exports = { 
+    getUserHandler,
+    updateUserHandler,
+    getUserProfileHandler, 
+    deleteUserHandler, 
+    isAdmin };

@@ -11,7 +11,10 @@ const Report = sequelize.define('Report', {
     out_room: { type: DataTypes.TEXT, allowNull: true },
     description: { type: DataTypes.TEXT, allowNull: false },
     technician_uuid: { type: DataTypes.UUID, allowNull: true },
-    report_files: { type: DataTypes.STRING, allowNull: false }
+    progress_uuid: { type: DataTypes.UUID, allowNull: true},
+    report_files: { type: DataTypes.STRING, allowNull: false },
+    report_url: { type: DataTypes.STRING, allowNull: false},
+    ticket: { type: DataTypes.STRING, allowNull: false}
 }, {
     timestamps: true,
     tableName: 'reports',

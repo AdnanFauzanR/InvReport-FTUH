@@ -8,7 +8,6 @@ const {
     deleteProgressHandler,
 } = require('../api/progress');
 const validate = require('../middleware/validate');
-const { deleteReportsHandler } = require('../api/report');
 
 router.post('/add-progress', uploadProgress.single('file'),[
     body('status').notEmpty().withMessage('Status is required'),
@@ -21,6 +20,6 @@ router.get('/list-progress', getProgressHandler);
 
 router.delete('/delete-progress', deleteProgressHandler);
 
-router.delete('/delete-all-progress', deleteReportsHandler);
+router.delete('/delete-all-progress', deleteProgressHandler);
 
 module.exports = router;

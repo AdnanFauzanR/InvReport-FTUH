@@ -1,11 +1,12 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const { Building, Report, Users } = require('../models')
+const { Building, Report, Users, Progress } = require('../models')
 const { v4: uuidv4 } = require('uuid');
 const sequelize = require('../config/db');
 const fs = require('fs');
 const { Op } = require('sequelize');
+const generateTicket = require('../util/ticket');
 
 const uploadReport = multer({
     storage: multer.memoryStorage(),
@@ -53,16 +54,19 @@ const addReportHandler = async (req, res) => {
         }
 
         const reportId = uuidv4();
+        const ticket = generateTicket();
         transaction = await sequelize.transaction();
 
-        const uploadPath = 'uploads/reports';
+        const uploadPath = path.join(__dirname, '..', 'public', 'uploads', 'reports');
         if (!fs.existsSync(uploadPath)) {
             fs.mkdirSync(uploadPath, { recursive: true });
         }
 
         // Simpan file sementara sebelum commit transaksi
         const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
-        filePath = `${uploadPath}/${filename}`;
+        const filePath = path.join(uploadPath, filename);
+        const fileUrl = `${req.protocol}://${req.get('host')}/uploads/reports/${filename}`; // Buat URL
+
         fs.writeFileSync(filePath, req.file.buffer);
 
         // Query insert ke database dengan transaksi
@@ -74,7 +78,9 @@ const addReportHandler = async (req, res) => {
             in_room_uuid: in_room || null,
             out_room: out_room || null,
             description,
-            report_files: filePath, // Tidak null
+            ticket: ticket,
+            report_files: filePath,
+            report_url: fileUrl
         }, { transaction });
 
         // Commit transaksi jika berhasil
@@ -83,7 +89,7 @@ const addReportHandler = async (req, res) => {
         res.status(201).json({
             message: 'Report sent successfully',
             report_id: reportId,
-            file_url: filePath
+            file_url: fileUrl
         });
 
     } catch (error) {
@@ -110,7 +116,7 @@ const getReportsHandler = async (req, res) => {
         const { building, technician_uuid } = req.query;
 
         const queryOptions = {
-            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'report_files'],
+            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'report_files', 'report_url', 'ticket', 'created_at'],
             include: [
                 {
                     model: Building,
@@ -123,10 +129,9 @@ const getReportsHandler = async (req, res) => {
                     attributes: ['name']
                 }
             ],
-            where: {} // Inisialisasi where agar bisa ditambah kondisi secara dinamis
+            where: {} 
         };
 
-        // Filter berdasarkan building
         if (building) {
             if (building === 'Fakultas') {
                 queryOptions.where[Op.or] = [
@@ -135,16 +140,13 @@ const getReportsHandler = async (req, res) => {
                             [Op.notIn]: ['Gedung Elektro', 'Gedung Arsitektur', 'Gedung Perkapalan', 'Gedung Geologi', 'Gedung Sipil', 'Gedung Mesin']
                         }
                     },
-                    {
-                        location: 'Out Room'
-                    }
+                    { location: 'Out Room' }
                 ];
             } else {
                 queryOptions.where['$Building.building_name$'] = building;
             }
         }
 
-        // Filter berdasarkan technician_uuid jika diberikan
         if (technician_uuid) {
             queryOptions.where['technician_uuid'] = technician_uuid;
         }
@@ -155,6 +157,25 @@ const getReportsHandler = async (req, res) => {
             return res.status(404).json({ error: 'No data found' });
         }
 
+        const reportUuids = reports.map(report => report.uuid);
+        const progressData = await Progress.findAll({
+            attributes: ['status', 'created_at', 'report_uuid'],
+            where: {
+                report_uuid: reportUuids
+            },
+            order: [['created_at', 'DESC']],
+            limit: 1,
+            subQuery: false
+        });
+        const progressMap = {};
+        progressData.forEach(progress => {
+            progressMap[progress.report_uuid] = {
+                status: progress.status,
+                date: progress.created_at
+            };
+        });
+
+        // Format response
         const formattedReports = reports.map(report => ({
             uuid: report.uuid,
             name: report.name,
@@ -164,7 +185,12 @@ const getReportsHandler = async (req, res) => {
             out_room: report.out_room ? report.out_room : null,
             technician_name: report.Technician ? report.Technician.name : null,
             description: report.description,
-            report_files: report.report_files
+            last_status: progressMap[report.uuid] ? progressMap[report.uuid].status : null,
+            date_report: report.created_at,
+            date_last_status: progressMap[report.uuid] ? progressMap[report.uuid].date : null,
+            report_files: report.report_files,
+            report_url: report.report_url,
+            ticketing: report.ticket
         }));
 
         res.status(200).json(formattedReports);
@@ -173,6 +199,77 @@ const getReportsHandler = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 };
+
+const detailReportHandler = async (req, res) => {
+    try {
+        const { uuid, ticket } = req.query;
+
+        const queryOptions = {
+            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'report_files', 'report_url', 'ticket', 'created_at'],
+            include: [
+                {
+                    model: Building,
+                    as: 'Building',
+                    attributes: ['building_name']
+                },
+                {
+                    model: Users,
+                    as: 'Technician',
+                    attributes: ['name']
+                }
+            ],
+            where: {} 
+        };
+
+        if (uuid) {
+            queryOptions.where['uuid'] = uuid;
+        } else if (ticket) {
+            queryOptions.where['ticket'] = ticket;
+        } else {
+            res.status(400).json({ error: 'uuid or ticket is required' });
+        }
+
+        const report = await Report.findOne(queryOptions);
+
+        if (!report) {
+            res.status(404).json({ error: 'No data found' });
+        }
+
+        const progress = await Progress.findAll({
+            attributes: ['status', 'created_at', 'report_uuid'],
+            where: {
+                report_uuid: report.uuid
+            },
+            order: [['created_at', 'DESC']],
+            limit: 1,
+            subQuery: false
+        });
+
+        const latestProgress = progress ? progress[0] : null;
+       
+        const formattedReport = {
+            uuid: report.uuid,
+            name: report.name,
+            phone_number: report.phone_number,
+            location: report.location,
+            building_name: report.Building ? report.Building.building_name : null,
+            out_room: report.out_room ? report.out_room : null,
+            technician_name: report.Technician ? report.Technician.name : null,
+            description: report.description,
+            last_status: latestProgress ? latestProgress.status : null,
+            date_report: report.created_at,
+            date_last_status: latestProgress ? latestProgress.created_at : null,
+            report_files: report.report_files,
+            report_url: report.report_url,
+            ticketing: report.ticket
+        }
+
+        res.status(200).json(formattedReport);
+    } catch(error) {
+        console.error('Error getting report:', error);
+        res.status(500).json({ error: 'Internal Server Error', details: error.message });
+    }
+}
 
 // Update Report
 const updateReportHandler = async (req, res) => {
@@ -271,6 +368,7 @@ module.exports = {
     uploadReport,
     addReportHandler,
     getReportsHandler,
+    detailReportHandler,
     updateReportHandler,
     deleteReportsHandler,
 };
