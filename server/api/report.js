@@ -26,7 +26,8 @@ const isValidPhoneNumber = (number) => {
 // Add Report
 const addReportHandler = async (req, res) => {
     let transaction;
-    let filePath = null;
+    let fileReportPath = null;
+    let fileProgressPath = null;
 
     try {
         const { name, phone_number, location, in_room, out_room, description } = req.body;
@@ -57,17 +58,22 @@ const addReportHandler = async (req, res) => {
         const ticket = generateTicket();
         transaction = await sequelize.transaction();
 
-        const uploadPath = path.join(__dirname, '..', 'public', 'uploads', 'reports');
-        if (!fs.existsSync(uploadPath)) {
-            fs.mkdirSync(uploadPath, { recursive: true });
+        const uploadReportPath = path.join(__dirname, '..', 'public', 'uploads', 'reports');
+        if (!fs.existsSync(uploadReportPath)) {
+            fs.mkdirSync(uploadReportPath, { recursive: true });
         }
+
+        const uploadProgressPath = path.join(__dirname, '..', 'public', 'uploads', 'progress');
+        if (!fs.existsSync(uploadProgressPath)) {
+            fs.mkdirSync(uploadProgressPath, { recursive: true});
+        } 
 
         // Simpan file sementara sebelum commit transaksi
         const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
-        const filePath = path.join(uploadPath, filename);
-        const fileUrl = `${req.protocol}://${req.get('host')}/uploads/reports/${filename}`; // Buat URL
+        fileReportPath = path.join(uploadReportPath, filename);
+        const fileReportUrl = `${req.protocol}://${req.get('host')}/uploads/reports/${filename}`; // Buat URL
 
-        fs.writeFileSync(filePath, req.file.buffer);
+        fs.writeFileSync(fileReportPath, req.file.buffer);
 
         // Query insert ke database dengan transaksi
         const newReport = await Report.create({
@@ -79,9 +85,21 @@ const addReportHandler = async (req, res) => {
             out_room: out_room || null,
             description,
             ticket: ticket,
-            report_files: filePath,
-            report_url: fileUrl
+            report_files: filename,
+            report_url: fileReportUrl
         }, { transaction });
+
+        fileProgressPath = path.join(uploadProgressPath, filename);
+        const fileProgressUrl = `${req.protocol}://${req.get('host')}/uploads/progress/${filename}`;
+
+        const newProgress = await Progress.create({
+            uuid: uuidv4(),
+            report_uuid: reportId,
+            status: 'Laporan Masuk',
+            description: description,
+            documentation: filename,
+            documentation_url: fileProgressUrl 
+        }, { transaction })
 
         // Commit transaksi jika berhasil
         await transaction.commit();
@@ -89,7 +107,7 @@ const addReportHandler = async (req, res) => {
         res.status(201).json({
             message: 'Report sent successfully',
             report_id: reportId,
-            file_url: fileUrl
+            file_url: fileReportUrl
         });
 
     } catch (error) {
@@ -97,9 +115,10 @@ const addReportHandler = async (req, res) => {
         if (transaction) await transaction.rollback();
         
         // Hapus file jika insert ke database gagal
-        if (filePath && fs.existsSync(filePath)) {
+        if ((fileReportPath && fs.existsSync(fileReportPath)) && fileProgressPath && fs.existsSync(fileProgressPath)) {
             try {
-                fs.unlinkSync(filePath);
+                fs.unlinkSync(fileReportPath);
+                fs.unlinkSync(fileProgressPath);
             } catch (fsError) {
                 console.error('Failed to delete file:', fsError);
             }
@@ -113,7 +132,7 @@ const addReportHandler = async (req, res) => {
 // Get Report
 const getReportsHandler = async (req, res) => {
     try {
-        const { building, technician_uuid } = req.query;
+        const { building, technician_uuid, ticket } = req.query;
 
         const queryOptions = {
             attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'report_files', 'report_url', 'ticket', 'created_at'],
@@ -129,7 +148,8 @@ const getReportsHandler = async (req, res) => {
                     attributes: ['name']
                 }
             ],
-            where: {} 
+            where: {},
+            order: [['created_at', 'ASC']] 
         };
 
         if (building) {
@@ -151,6 +171,10 @@ const getReportsHandler = async (req, res) => {
             queryOptions.where['technician_uuid'] = technician_uuid;
         }
 
+        if (ticket) {
+            queryOptions.where['ticket'] = ticket;
+        }
+
         const reports = await Report.findAll(queryOptions);
 
         if (!reports || reports.length === 0) {
@@ -161,18 +185,23 @@ const getReportsHandler = async (req, res) => {
         const progressData = await Progress.findAll({
             attributes: ['status', 'created_at', 'report_uuid'],
             where: {
-                report_uuid: reportUuids
+                report_uuid: {
+                    [Op.in]: reportUuids
+                }
             },
-            order: [['created_at', 'DESC']],
-            limit: 1,
-            subQuery: false
+            order: [['created_at', 'DESC']]
         });
+
         const progressMap = {};
         progressData.forEach(progress => {
-            progressMap[progress.report_uuid] = {
-                status: progress.status,
-                date: progress.created_at
-            };
+            const reportId = progress.report_uuid;
+        
+            if (!progressMap[reportId]) {
+                progressMap[reportId] = {
+                    status: progress.status,
+                    date: progress.created_at
+                };
+            }
         });
 
         // Format response

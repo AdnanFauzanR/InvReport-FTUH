@@ -22,31 +22,48 @@ const isAdmin = async (req, res, next) => {
     }
 };
 
-const getUserHandler = async (req, res) => {
+const getUsersHandler = async (req, res) => {
     try {
-        const { id, division } = req.query;
+        const { division, role } = req.query;
 
-        let query = 'SELECT id, name, email, username, division, created_at, updated_at FROM users';
-        let values = [];
+        console.log(role);
 
-        if (id) {
-            query += ' WHERE id = $1';
-            values.push(id);
-        } else if (division) {
-            query += ' WHERE division = $1';
-            values.push(division);
+        const queryOptions = {
+            attributes: [
+              'uuid', 'name', 'username', 'email', 'division', 'role'  
+            ],
+            where: {}
         }
 
-        const result = await pool.query(query, values);
-
-        if (id && result.rows.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
+        if (role) {
+            queryOptions.where['role'] = role;
+            queryOptions.order = [['created_at', 'DESC']];
         }
-        
-        res.json({ users: result.rows });
+
+        if (division) {
+            queryOptions.where['division'] = division;
+            queryOptions.order = [['created_at', 'DESC']];
+        }
+
+        const users = await Users.findAll(queryOptions);
+
+        if (!users || users.length === 0) {
+            return res.status(404).json({ error: 'No data found' });
+        }
+
+        const formattedUsers = users.map(user => ({
+            uuid: user.uuid,
+            name: user.name,
+            username: user.username,
+            email: user.email,
+            division: user.division,
+            role: user.role
+        }));
+
+        res.status(200).json(formattedUsers);
     } catch (error) {
-        console.error('Fetch users error:', error);
-        res.status(500).json({ error: 'Server Error' })
+        console.error('Error getting users:', error);
+        res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 };
 
@@ -141,7 +158,7 @@ const deleteUserHandler = async (req, res) => {
 }
 
 module.exports = { 
-    getUserHandler,
+    getUsersHandler,
     updateUserHandler,
     getUserProfileHandler, 
     deleteUserHandler, 

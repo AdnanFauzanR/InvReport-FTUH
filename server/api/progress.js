@@ -68,14 +68,14 @@ const addProgressHandler = async(req, res) => {
         transaction = await sequelize.transaction();
 
         const uploadPath = path.join(__dirname, '..', 'public', 'uploads', 'progress');
-                if (!fs.existsSync(uploadPath)) {
-                    fs.mkdirSync(uploadPath, { recursive: true });
-                }
-        
-                // Simpan file sementara sebelum commit transaksi
-                const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
-                const filePath = path.join(uploadPath, filename);
-                const fileUrl = `${req.protocol}://${req.get('host')}/uploads/progress/${filename}`; // Buat URL
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+
+        // Simpan file sementara sebelum commit transaksi
+        const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
+        filePath = path.join(uploadPath, filename);
+        const fileUrl = `${req.protocol}://${req.get('host')}/uploads/progress/${filename}`; // Buat URL
         fs.writeFileSync(filePath, req.file.buffer);
 
         const newProgress = await Progress.create({
@@ -90,10 +90,16 @@ const addProgressHandler = async(req, res) => {
 
         }, { transaction });
 
-        const updateReport = await Progress.update(
-            { progress_uuid: progressId },
-            { where: {uuid: report_uuid } }
-        )
+        const updateData = { progress_uuid: progressId };
+
+        if (technician_uuid) {
+            updateData.technician_uuid = technician_uuid;
+        }
+
+        const updateReport = await Report.update(
+            updateData,
+            { where: { uuid: report_uuid }, transaction }
+        );
 
         await transaction.commit();
 
@@ -125,7 +131,7 @@ const getProgressHandler = async (req, res) => {
         const { report_uuid } = req.query;
         
         const queryOptions = {
-            attributes: ['uuid', 'status', 'description', 'external_technician', 'documentation', 'documentation_url'],
+            attributes: ['uuid', 'status', 'description', 'external_technician', 'documentation', 'documentation_url', 'created_at'],
             include: [
                 {
                     model: Users,
@@ -156,6 +162,7 @@ const getProgressHandler = async (req, res) => {
             description: progress.description,
             documentation: progress.documentation,
             documentation_url: progress.documentation_url,
+            progress_date: progress.created_at
         }));
         
         res.status(200).json(formattedProgress);

@@ -23,7 +23,7 @@ router.get('/list-report', getReportsHandler);
 router.get('/detail-report', detailReportHandler);
 
 router.put('/update-report/:uuid', [
-    body('status').notEmpty().withMessage('Status is required')
+    body('technician_uuid').notEmpty().withMessage('Technician is required')
 ], validate, updateReportHandler);
 
 router.delete('/delete-report', deleteReportsHandler);

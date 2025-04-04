@@ -1,18 +1,16 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { 
-    getUserHandler,
+    getUsersHandler,
     getUserProfileHandler,
     updateUserHandler, 
     deleteUserHandler, 
-    isAdmin 
+    isAdmin,
 } = require('../api/users');
 const validate = require('../middleware/validate');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
-
-router.get('/users', getUserHandler);
 
 // Route untuk update user (sebagian atau keseluruhan)
 router.put('/users/:id', [
@@ -25,6 +23,8 @@ router.put('/users/:id', [
 ], validate, updateUserHandler);
 
 router.get('/get-user-profile', authenticateToken, getUserProfileHandler);
+
+router.get('/list-user', getUsersHandler)
 
 // Route untuk delete user
 router.delete('/users/:id', isAdmin, deleteUserHandler);
