@@ -132,7 +132,7 @@ const addReportHandler = async (req, res) => {
 // Get Report
 const getReportsHandler = async (req, res) => {
     try {
-        const { building, technician_uuid, ticket } = req.query;
+        const { building, technician_uuid, ticket, limit } = req.query;
 
         const queryOptions = {
             attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'report_files', 'report_url', 'ticket', 'created_at'],
@@ -148,9 +148,16 @@ const getReportsHandler = async (req, res) => {
                     attributes: ['name']
                 }
             ],
-            where: {},
-            order: [['created_at', 'ASC']] 
+            where: {}
         };
+
+        // Tentukan order berdasarkan ada tidaknya limit
+        if (limit && !isNaN(limit)) {
+            queryOptions.order = [['created_at', 'DESC']]; // Data terbaru dulu
+            queryOptions.limit = parseInt(limit);
+        } else {
+            queryOptions.order = [['created_at', 'ASC']]; // Data terlama dulu
+        }
 
         if (building) {
             if (building === 'Fakultas') {
@@ -195,7 +202,6 @@ const getReportsHandler = async (req, res) => {
         const progressMap = {};
         progressData.forEach(progress => {
             const reportId = progress.report_uuid;
-        
             if (!progressMap[reportId]) {
                 progressMap[reportId] = {
                     status: progress.status,
@@ -204,7 +210,6 @@ const getReportsHandler = async (req, res) => {
             }
         });
 
-        // Format response
         const formattedReports = reports.map(report => ({
             uuid: report.uuid,
             name: report.name,
@@ -228,6 +233,7 @@ const getReportsHandler = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 };
+
 
 const detailReportHandler = async (req, res) => {
     try {

@@ -2,23 +2,31 @@ const pool = require('../config/db');
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { Users } = require('../models')
+const { Users } = require('../models');
+const { Op } = require('sequelize');
 
 const isAdmin = async (req, res, next) => {
     try {
-        const token = req.header('Authorization').replace('Bearer ', '');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const result = await pool.query('SELECT division FROM users WHERE uuid = $1', [decoded.uuid]);
-        const user = result.rows[0];
+        const token = req.header('Authorization')?.replace('Bearer ', '');
 
-        if (!user || user.division !== 'admin') {
-            return res.status(403).json({ error: 'Access denied. Admin only'});
+        if (!token) {
+            return res.status(401).json({ error: 'No token provided' });
         }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        const user = await Users.findOne({ where: { uuid: decoded.uuid } });
+
+        if (!user || user.role !== 'Admin') {
+            return res.status(403).json({ error: 'Access denied. Admin only' });
+        }
+
+        req.user = user;
 
         next();
     } catch (error) {
         console.error('Authorization error:', error);
-        res.status(401).json({ error: 'Invalid Token' });
+        res.status(401).json({ error: 'Invalid or expired token' });
     }
 };
 
@@ -86,26 +94,33 @@ const getUserProfileHandler = async (req, res) => {
 
 const updateUserHandler = async (req, res) => {
     try {
-        const { id } = req.params;
-        const { name, email, username, password, division } = req.body;
+        const { userId } = req.params;
+        const { name, username, email, password, division, role } = req.body;
 
-        // Validasi input
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ error: errors.array() });
+        const updateData = {};
+
+        if (name) updateData.name = name;
+        if (email) updateData.email = email;
+        if (division) updateData.division = division;
+        if (role) updateData.role = role;
+
+        // Cek username baru
+        if (username) {
+            const existingUser = await Users.findOne({
+                where: {
+                    username,
+                    uuid: { [Op.ne]: userId } // Hindari bentrok dengan username milik user sendiri
+                }
+            });
+
+            if (existingUser) {
+                return res.status(400).json({ error: 'Username already exists' });
+            }
+
+            updateData.username = username;
         }
 
-        // Cek apakah user ada
-        const userCheck = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
-        if (userCheck.rows.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-
-        // Ambil data lama
-        const oldUser = userCheck.rows[0];
-
-        // Hash password jika diperbarui
-        let hashedPassword = oldUser.password;
+        // Validasi dan hash password
         if (password) {
             const passwordRegex = /^(?=.*[A-Z])(?=.*[\W_]).{8,}$/;
             if (!passwordRegex.test(password)) {
@@ -113,49 +128,47 @@ const updateUserHandler = async (req, res) => {
                     error: 'Password must be at least 8 characters, contain 1 uppercase letter, and 1 special character'
                 });
             }
-            hashedPassword = await bcrypt.hash(password, 10);
+
+            const hashedPassword = await bcrypt.hash(password, 6);
+            updateData.password = hashedPassword;
         }
 
-        // Update hanya field yang diberikan
-        const updatedUser = {
-            name: name || oldUser.name,
-            email: email || oldUser.email,
-            username: username || oldUser.username,
-            password: hashedPassword,
-            division: division || oldUser.division
-        };
+        // Pastikan ada yang diupdate
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({ error: 'No data to update' });
+        }
 
-        await pool.query(
-            `UPDATE users SET name = $1, email = $2, username = $3, password = $4, division = $5, updated_at = NOW() WHERE id = $6`,
-            [updatedUser.name, updatedUser.email, updatedUser.username, updatedUser.password, updatedUser.division, id]
-        );
+        const updated = await Users.update(updateData, {
+            where: { uuid: userId }
+        });
 
-        res.json({ message: 'User updated successfully' });
+        if (updated[0] === 0) {
+            return res.status(404).json({ error: 'User not found or no changes made' });
+        }
+
+        res.status(200).json({ message: 'User updated successfully' });
     } catch (error) {
-        console.error('Update error:', error);
-        res.status(500).json({ error: 'Server Error' });
+        console.error('Error updating user:', error);
+        res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 };
 
-
 const deleteUserHandler = async (req, res) => {
     try {
-        const { id } = req.params;
+        const { userId } = req.params;
 
-        const userCheck = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
-        if (userCheck.rows.length === 0) {
+        const deleted = await Users.destroy({ where: { uuid: userId } });
+
+        if (deleted === 0) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        await pool.query('DELETE FROM users WHERE id = $1', [id]);
-
-        res.json({ message: 'User deleted successfully' });
-    } catch(error) {
-        console.error('Delete error:', error);
-        res.status(500).json({ error: 'Server Error' });
+        res.status(200).json({ message: 'User deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
-    
-}
+};
 
 module.exports = { 
     getUsersHandler,

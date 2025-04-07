@@ -13,20 +13,13 @@ const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 // Route untuk update user (sebagian atau keseluruhan)
-router.put('/users/:id', [
-    isAdmin,
-    body('name').optional().notEmpty().withMessage('Name cannot be empty'),
-    body('email').optional().isEmail().withMessage('Invalid email'),
-    body('username').optional().notEmpty().withMessage('Username cannot be empty'),
-    body('password').optional().isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-    body('division').optional().notEmpty().withMessage('Division cannot be empty')
-], validate, updateUserHandler);
+router.put('/update-user/:userId', isAdmin, validate, updateUserHandler);
 
 router.get('/get-user-profile', authenticateToken, getUserProfileHandler);
 
 router.get('/list-user', getUsersHandler)
 
 // Route untuk delete user
-router.delete('/users/:id', isAdmin, deleteUserHandler);
+router.delete('/delete-user/:userId', isAdmin, deleteUserHandler);
 
 module.exports = router;
