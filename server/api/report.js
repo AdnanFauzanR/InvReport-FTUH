@@ -26,11 +26,10 @@ const isValidPhoneNumber = (number) => {
 // Add Report
 const addReportHandler = async (req, res) => {
     let transaction;
-    let fileReportPath = null;
-    let fileProgressPath = null;
+    const savedFilePaths = [];
 
     try {
-        const { name, phone_number, location, in_room, out_room, description } = req.body;
+        const { name, phone_number, location, in_room, out_room, description, latitude, longitude } = req.body;
 
         // Validasi manual
         if (!isValidPhoneNumber(phone_number)) {
@@ -42,9 +41,6 @@ const addReportHandler = async (req, res) => {
         if (!location) {
             return res.status(400).json({ error: 'Location is required' });
         }
-        if (!req.file) {
-            return res.status(400).json({ error: 'Image/Video is required' });
-        }
 
         // Validasi khusus lokasi
         if (location === 'In Room' && (!in_room || in_room.trim() === '')) {
@@ -52,6 +48,14 @@ const addReportHandler = async (req, res) => {
         }
         if (location === 'Out Room' && (!out_room || out_room.trim() === '')) {
             return res.status(400).json({ error: 'Specific Location (out_room) is required for Out Room' });
+        }
+
+        // Validasi file
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ error: 'At least one image/video is required' });
+        }
+        if (req.files.length > 5) {
+            return res.status(400).json({ error: 'You can upload up to 5 files only' });
         }
 
         const reportId = uuidv4();
@@ -65,18 +69,32 @@ const addReportHandler = async (req, res) => {
 
         const uploadProgressPath = path.join(__dirname, '..', 'public', 'uploads', 'progress');
         if (!fs.existsSync(uploadProgressPath)) {
-            fs.mkdirSync(uploadProgressPath, { recursive: true});
-        } 
+            fs.mkdirSync(uploadProgressPath, { recursive: true });
+        }
 
-        // Simpan file sementara sebelum commit transaksi
-        const filename = `${uuidv4()}${path.extname(req.file.originalname)}`;
-        fileReportPath = path.join(uploadReportPath, filename);
-        const fileReportUrl = `${req.protocol}://${req.get('host')}/uploads/reports/${filename}`; // Buat URL
+        const filenames = [];
+        const reportUrls = [];
+        const progressUrls = [];
 
-        fs.writeFileSync(fileReportPath, req.file.buffer);
+        for (const file of req.files) {
+            const filename = `${uuidv4()}${path.extname(file.originalname)}`;
+            const reportFilePath = path.join(uploadReportPath, filename);
+            const reportUrl = `${req.protocol}://${req.get('host')}/uploads/reports/${filename}`;
+            const progressFilePath = path.join(uploadProgressPath, filename);
+            const progressUrl = `${req.protocol}://${req.get('host')}/uploads/progress/${filename}`;
 
-        // Query insert ke database dengan transaksi
-        const newReport = await Report.create({
+            fs.writeFileSync(reportFilePath, file.buffer);
+            fs.writeFileSync(progressFilePath, file.buffer);
+
+            savedFilePaths.push(reportFilePath, progressFilePath); // Track for potential cleanup
+
+            filenames.push(filename);
+            reportUrls.push(reportUrl);
+            progressUrls.push(progressUrl);
+        }
+
+        // Insert ke database
+        await Report.create({
             uuid: reportId,
             name,
             phone_number,
@@ -84,43 +102,41 @@ const addReportHandler = async (req, res) => {
             in_room_uuid: in_room || null,
             out_room: out_room || null,
             description,
+            latitude: latitude || null,
+            longitude: longitude || null,
             ticket: ticket,
-            report_files: filename,
-            report_url: fileReportUrl
+            report_files: JSON.stringify(filenames),
+            report_url: JSON.stringify(reportUrls)
         }, { transaction });
 
-        fileProgressPath = path.join(uploadProgressPath, filename);
-        const fileProgressUrl = `${req.protocol}://${req.get('host')}/uploads/progress/${filename}`;
-
-        const newProgress = await Progress.create({
+        await Progress.create({
             uuid: uuidv4(),
             report_uuid: reportId,
             status: 'Laporan Masuk',
             description: description,
-            documentation: filename,
-            documentation_url: fileProgressUrl 
-        }, { transaction })
+            documentation: JSON.stringify(filenames),
+            documentation_url: JSON.stringify(progressUrls)
+        }, { transaction });
 
-        // Commit transaksi jika berhasil
         await transaction.commit();
 
         res.status(201).json({
             message: 'Report sent successfully',
             report_id: reportId,
-            file_url: fileReportUrl
+            file_urls: reportUrls
         });
 
     } catch (error) {
-        // Rollback transaksi jika terjadi error
         if (transaction) await transaction.rollback();
-        
-        // Hapus file jika insert ke database gagal
-        if ((fileReportPath && fs.existsSync(fileReportPath)) && fileProgressPath && fs.existsSync(fileProgressPath)) {
-            try {
-                fs.unlinkSync(fileReportPath);
-                fs.unlinkSync(fileProgressPath);
-            } catch (fsError) {
-                console.error('Failed to delete file:', fsError);
+
+        // Hapus file jika gagal
+        for (const filePath of savedFilePaths) {
+            if (fs.existsSync(filePath)) {
+                try {
+                    fs.unlinkSync(filePath);
+                } catch (fsErr) {
+                    console.error('Failed to delete file:', fsErr);
+                }
             }
         }
 
@@ -129,13 +145,14 @@ const addReportHandler = async (req, res) => {
     }
 };
 
+
 // Get Report
 const getReportsHandler = async (req, res) => {
     try {
         const { building, technician_uuid, ticket, limit } = req.query;
 
         const queryOptions = {
-            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'report_files', 'report_url', 'ticket', 'created_at'],
+            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'priority', 'report_files', 'report_url', 'ticket', 'created_at'],
             include: [
                 {
                     model: Building,
@@ -220,6 +237,7 @@ const getReportsHandler = async (req, res) => {
             technician_name: report.Technician ? report.Technician.name : null,
             description: report.description,
             last_status: progressMap[report.uuid] ? progressMap[report.uuid].status : null,
+            priority: report.priority,
             date_report: report.created_at,
             date_last_status: progressMap[report.uuid] ? progressMap[report.uuid].date : null,
             report_files: report.report_files,
@@ -240,7 +258,7 @@ const detailReportHandler = async (req, res) => {
         const { uuid, ticket } = req.query;
 
         const queryOptions = {
-            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'report_files', 'report_url', 'ticket', 'created_at'],
+            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'priority', 'report_files', 'report_url', 'ticket', 'created_at'],
             include: [
                 {
                     model: Building,
@@ -292,6 +310,7 @@ const detailReportHandler = async (req, res) => {
             technician_name: report.Technician ? report.Technician.name : null,
             description: report.description,
             last_status: latestProgress ? latestProgress.status : null,
+            priority: report.priority,
             date_report: report.created_at,
             date_last_status: latestProgress ? latestProgress.created_at : null,
             report_files: report.report_files,
@@ -310,30 +329,44 @@ const detailReportHandler = async (req, res) => {
 const updateReportHandler = async (req, res) => {
     try {
         const { uuid } = req.params;
-        const { technician_uuid } = req.body;
+        const { technician_uuid, priority } = req.body;
 
-        if (!technician_uuid) {
-            return res.status(400).json({ error: 'Technician UUID is required' });
+        // Cek apakah setidaknya salah satu field disediakan
+        if (!technician_uuid && !priority) {
+            return res.status(400).json({ error: 'At least technician_uuid or priority must be provided' });
         }
 
-        // Cek apakah technician_uuid valid dan apakah role-nya adalah Teknisi
-        const technician = await Users.findOne({
-            where: { uuid: technician_uuid }
+        const updateFields = {};
+        // Validasi dan tambahkan technician_uuid jika diberikan
+        if (technician_uuid) {
+            const technician = await Users.findOne({
+                where: { uuid: technician_uuid }
+            });
+
+            if (!technician) {
+                return res.status(404).json({ error: 'Technician not found' });
+            }
+
+            if (technician.role !== 'Teknisi') {
+                return res.status(403).json({ error: 'User is not authorized as a Technician' });
+            }
+
+            updateFields.technician_uuid = technician_uuid;
+        }
+
+        // Tambahkan priority jika diberikan
+        if (priority) {
+            updateFields.priority = priority;
+        }
+
+        // Lakukan update hanya dengan field yang tersedia
+        const [updatedRowsCount] = await Report.update(updateFields, {
+            where: { uuid: uuid }
         });
 
-        if (!technician) {
-            return res.status(404).json({ error: 'Technician not found' });
+        if (updatedRowsCount === 0) {
+            return res.status(404).json({ error: 'Report not found or nothing changed' });
         }
-
-        if (technician.role !== 'Teknisi') {
-            return res.status(403).json({ error: 'User is not authorized as a Technician' });
-        }
-
-        // Update laporan jika user memiliki role Teknisi
-        await Report.update(
-            { technician_uuid: technician_uuid },
-            { where: { uuid: uuid } }
-        );
 
         res.status(200).json({
             message: 'Report updated successfully',
@@ -343,6 +376,7 @@ const updateReportHandler = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 };
+
 
 // Delete Report
 const deleteReportsHandler = async (req, res) => {

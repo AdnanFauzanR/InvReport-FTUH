@@ -20,7 +20,7 @@ const getBuildingHandler = async (req, res) => {
         }))
         res.status(200).json(formattedBuildings)
     } catch (error) {
-        console.error('Error getting report:', error);
+        console.error('Error getting buildings:', error);
         res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 }

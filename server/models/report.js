@@ -10,11 +10,14 @@ const Report = sequelize.define('Report', {
     in_room_uuid: {type: DataTypes.UUID, allowNull: true },
     out_room: { type: DataTypes.TEXT, allowNull: true },
     description: { type: DataTypes.TEXT, allowNull: false },
+    priority: { type: DataTypes.ENUM('Prioritas Tinggi', 'Prioritas Sedang', 'Prioritas Rendah'), allowNull: true},
     technician_uuid: { type: DataTypes.UUID, allowNull: true },
     progress_uuid: { type: DataTypes.UUID, allowNull: true},
     report_files: { type: DataTypes.STRING, allowNull: false },
     report_url: { type: DataTypes.STRING, allowNull: false},
-    ticket: { type: DataTypes.STRING, allowNull: false}
+    ticket: { type: DataTypes.STRING, allowNull: false},
+    longitude: { type: DataTypes.FLOAT, allowNull: false},
+    latitude: { type: DataTypes.FLOAT, allowNull: false}
 }, {
     timestamps: true,
     tableName: 'reports',

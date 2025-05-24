@@ -5,7 +5,7 @@ const {
     getUserProfileHandler,
     updateUserHandler, 
     deleteUserHandler, 
-    isAdmin,
+    authorizeRoles,
 } = require('../api/users');
 const validate = require('../middleware/validate');
 const { authenticateToken } = require('../middleware/auth');
@@ -13,13 +13,15 @@ const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 // Route untuk update user (sebagian atau keseluruhan)
-router.put('/update-user/:userId', isAdmin, validate, updateUserHandler);
+router.put('/update-user/:userId', authorizeRoles('Admin'), validate, updateUserHandler);
 
 router.get('/get-user-profile', authenticateToken, getUserProfileHandler);
+
+router.get('/get-user-profile/:id', getUserProfileHandler);
 
 router.get('/list-user', getUsersHandler)
 
 // Route untuk delete user
-router.delete('/delete-user/:userId', isAdmin, deleteUserHandler);
+router.delete('/delete-user/:userId', authorizeRoles('Admin'), deleteUserHandler);
 
 module.exports = router;

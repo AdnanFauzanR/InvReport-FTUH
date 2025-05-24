@@ -49,6 +49,9 @@ const loginHandler = async (req, res) => {
             case 'Teknisi':
                 dashboardRoute = '/dashboard/teknisi';
                 break;
+            case 'Kepala Workshop':
+                dashboardRoute = '/dashboard/workshop';
+                break;
             default:
                 return res.status(403).json({ error: 'Unauthorized role' });
         }
@@ -58,7 +61,8 @@ const loginHandler = async (req, res) => {
                 uuid: user.uuid,
                 username: user.username,
                 email: user.email,
-                division: user.division
+                division: user.division,
+                role: user.role
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }

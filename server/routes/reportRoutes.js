@@ -10,8 +10,9 @@ const {
     deleteReportsHandler,
 } = require('../api/report');
 const validate = require('../middleware/validate');
+const { authorizeRoles } = require('../api/users');
 
-router.post('/add-report', uploadReport.single('file'), [
+router.post('/add-report', uploadReport.array('files', 5), [
     body('name').notEmpty().withMessage('Name is required'),
     body('phone_number').notEmpty().withMessage('Phone Number is required'),
     body('location').notEmpty().withMessage('Location is required'),
@@ -22,12 +23,10 @@ router.get('/list-report', getReportsHandler);
 
 router.get('/detail-report', detailReportHandler);
 
-router.put('/update-report/:uuid', [
-    body('technician_uuid').notEmpty().withMessage('Technician is required')
-], validate, updateReportHandler);
+router.put('/update-report/:uuid', authorizeRoles('Admin', 'Kepala Workshop'), validate, updateReportHandler);
 
-router.delete('/delete-report', deleteReportsHandler);
+router.delete('/delete-report', authorizeRoles('Admin', 'Kepala Workshop') ,deleteReportsHandler);
 
-router.delete('/delete-all-report', deleteReportsHandler);
+router.delete('/delete-all-report', authorizeRoles('Admin', 'Kepala Workshop') ,deleteReportsHandler);
 
 module.exports = router;

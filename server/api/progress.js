@@ -172,6 +172,27 @@ const getProgressHandler = async (req, res) => {
     }
 }
 
+const updateProgressHandler = async (req, res) => {
+    try {
+        const { uuid } = req.params;
+        const { status } = req.body;
+
+        if (!status) {
+            return res.status(400).json({ error: 'Status must be selected' });
+        }
+
+        const updateProgress = await Progress.update(
+            { status: status },
+            { where: { uuid: uuid }}
+        )
+
+        res.status(200).json({ message: 'Progress Status Updated Successfully' });
+    } catch (error) {
+        console.error('Error updating progress status', error);
+        res.status(500).json({ error: 'Internal Server Error', details: error.message });
+    }
+}
+
 // Delete Progress Report
 const deleteProgressHandler = async (req, res) => {
     try {
@@ -251,5 +272,6 @@ module.exports = {
     uploadProgress,
     addProgressHandler,
     getProgressHandler,
+    updateProgressHandler,
     deleteProgressHandler
 };
