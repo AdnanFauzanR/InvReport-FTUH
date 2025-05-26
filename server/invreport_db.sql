@@ -76,6 +76,7 @@ CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     uuid UUID DEFAULT uuid_generate_v4() NOT NULL UNIQUE,
     name VARCHAR(50) NOT NULL,
+    username VARCHAR(100) NOT NULL UNIQUE, 
     email VARCHAR(100) NOT NULL UNIQUE,
     division division_enum NOT NULL,
     role role_enum NOT NULL,

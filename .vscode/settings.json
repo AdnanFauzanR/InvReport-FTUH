@@ -19,6 +19,16 @@
             "database": "invreport_ftuh",
             "username": "postgres",
             "password": "admin"
+        },
+        {
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "SIKATUTUI",
+            "database": "sikatutui",
+            "password": "admin",
+            "username": "postgres"
         }
     ]
 }

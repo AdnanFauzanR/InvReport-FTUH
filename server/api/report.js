@@ -7,6 +7,7 @@ const sequelize = require('../config/db');
 const fs = require('fs');
 const { Op } = require('sequelize');
 const generateTicket = require('../util/ticket');
+const { drive, uploadToDrive, deleteFolderAndContents, reportsFolderId } = require('./drive');
 
 const uploadReport = multer({
     storage: multer.memoryStorage(),
@@ -23,15 +24,12 @@ const isValidPhoneNumber = (number) => {
     return /^\+?[0-9]{10,15}$/.test(number);
 };
 
-// Add Report
 const addReportHandler = async (req, res) => {
     let transaction;
-    const savedFilePaths = [];
-
+    let reportFolderId = null;
     try {
         const { name, phone_number, location, in_room, out_room, description, latitude, longitude } = req.body;
 
-        // Validasi manual
         if (!isValidPhoneNumber(phone_number)) {
             return res.status(400).json({ error: 'Invalid phone number' });
         }
@@ -42,58 +40,10 @@ const addReportHandler = async (req, res) => {
             return res.status(400).json({ error: 'Location is required' });
         }
 
-        // Validasi khusus lokasi
-        if (location === 'In Room' && (!in_room || in_room.trim() === '')) {
-            return res.status(400).json({ error: 'Specific Location (in_room) is required for In Room' });
-        }
-        if (location === 'Out Room' && (!out_room || out_room.trim() === '')) {
-            return res.status(400).json({ error: 'Specific Location (out_room) is required for Out Room' });
-        }
-
-        // Validasi file
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({ error: 'At least one image/video is required' });
-        }
-        if (req.files.length > 5) {
-            return res.status(400).json({ error: 'You can upload up to 5 files only' });
-        }
-
         const reportId = uuidv4();
         const ticket = generateTicket();
         transaction = await sequelize.transaction();
 
-        const uploadReportPath = path.join(__dirname, '..', 'public', 'uploads', 'reports');
-        if (!fs.existsSync(uploadReportPath)) {
-            fs.mkdirSync(uploadReportPath, { recursive: true });
-        }
-
-        const uploadProgressPath = path.join(__dirname, '..', 'public', 'uploads', 'progress');
-        if (!fs.existsSync(uploadProgressPath)) {
-            fs.mkdirSync(uploadProgressPath, { recursive: true });
-        }
-
-        const filenames = [];
-        const reportUrls = [];
-        const progressUrls = [];
-
-        for (const file of req.files) {
-            const filename = `${uuidv4()}${path.extname(file.originalname)}`;
-            const reportFilePath = path.join(uploadReportPath, filename);
-            const reportUrl = `${req.protocol}://${req.get('host')}/uploads/reports/${filename}`;
-            const progressFilePath = path.join(uploadProgressPath, filename);
-            const progressUrl = `${req.protocol}://${req.get('host')}/uploads/progress/${filename}`;
-
-            fs.writeFileSync(reportFilePath, file.buffer);
-            fs.writeFileSync(progressFilePath, file.buffer);
-
-            savedFilePaths.push(reportFilePath, progressFilePath); // Track for potential cleanup
-
-            filenames.push(filename);
-            reportUrls.push(reportUrl);
-            progressUrls.push(progressUrl);
-        }
-
-        // Insert ke database
         await Report.create({
             uuid: reportId,
             name,
@@ -105,17 +55,67 @@ const addReportHandler = async (req, res) => {
             latitude: latitude || null,
             longitude: longitude || null,
             ticket: ticket,
-            report_files: JSON.stringify(filenames),
-            report_url: JSON.stringify(reportUrls)
+            report_files: JSON.stringify(req.files.map(f => f.originalname)),
+            report_url: "[]"
         }, { transaction });
 
+        // 📁 Buat folder report
+        const reportFolder = await drive.files.create({
+            requestBody: {
+                name: `Report - ${reportId}`,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [reportsFolderId]
+            },
+            fields: 'id'
+        });
+        reportFolderId = reportFolder.data.id;
+
+        // 📁 Buat folder progress
+        const progressFolder = await drive.files.create({
+            requestBody: {
+                name: `Progress - ${reportId}`,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [reportFolderId]
+            },
+            fields: 'id'
+        });
+        const progressFolderId = progressFolder.data.id;
+
+        const fileLinks = [];
+        const progressFileLinks = [];
+
+        // 🏞 Upload files ke reportFolder dan progressFolder
+        const isMultiple = req.files.length > 1;
+        for (let i = 0; i < req.files.length; i++) {
+            const file = req.files[i];
+            const ext = path.extname(file.originalname);
+            const index = isMultiple ? ` ${i + 1}` : '';
+            const filenameReport = `Report${index} - ${reportId}${ext}`;
+            const filenameProgress = `Laporan Masuk${index} - ${reportId}${ext}` 
+
+            // Upload ke reportFolder
+            const uploadedReport = await uploadToDrive(file, reportFolderId, filenameReport);
+            fileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedReport.id}`);
+
+            // Upload ke progressFolder dengan penamaan sama
+            const uploadedProgress = await uploadToDrive(file, progressFolderId, filenameProgress);
+            progressFileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedProgress.id}`);
+        }
+
+        // Update file URL di Report
+        await Report.update(
+            { report_url: JSON.stringify(fileLinks) },
+            { where: { uuid: reportId }, transaction }
+        );
+
+        // Simpan Progress
         await Progress.create({
             uuid: uuidv4(),
             report_uuid: reportId,
             status: 'Laporan Masuk',
             description: description,
-            documentation: JSON.stringify(filenames),
-            documentation_url: JSON.stringify(progressUrls)
+            documentation: JSON.stringify(req.files.map(f => f.originalname)),
+            documentation_url: JSON.stringify(progressFileLinks)
         }, { transaction });
 
         await transaction.commit();
@@ -123,20 +123,20 @@ const addReportHandler = async (req, res) => {
         res.status(201).json({
             message: 'Report sent successfully',
             report_id: reportId,
-            file_urls: reportUrls
+            file_urls: fileLinks,
+            progress_file_urls: progressFileLinks
         });
 
     } catch (error) {
         if (transaction) await transaction.rollback();
 
-        // Hapus file jika gagal
-        for (const filePath of savedFilePaths) {
-            if (fs.existsSync(filePath)) {
-                try {
-                    fs.unlinkSync(filePath);
-                } catch (fsErr) {
-                    console.error('Failed to delete file:', fsErr);
-                }
+        // 🧹 Bersihkan folder utama jika terjadi error
+        if (reportFolderId) {
+            try {
+                // Hapus folder utama dan semua isinya
+                await deleteFolderAndContents(reportFolderId);
+            } catch (cleanupError) {
+                console.error('Failed to clean up folder:', cleanupError);
             }
         }
 
@@ -146,13 +146,14 @@ const addReportHandler = async (req, res) => {
 };
 
 
+
 // Get Report
 const getReportsHandler = async (req, res) => {
     try {
         const { building, technician_uuid, ticket, limit } = req.query;
 
         const queryOptions = {
-            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'priority', 'report_files', 'report_url', 'ticket', 'created_at'],
+            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'priority', 'latitude', 'longitude', 'report_files', 'report_url', 'ticket', 'created_at'],
             include: [
                 {
                     model: Building,
@@ -238,6 +239,8 @@ const getReportsHandler = async (req, res) => {
             description: report.description,
             last_status: progressMap[report.uuid] ? progressMap[report.uuid].status : null,
             priority: report.priority,
+            latitude: report.latitude,
+            longitude: report.longitude,
             date_report: report.created_at,
             date_last_status: progressMap[report.uuid] ? progressMap[report.uuid].date : null,
             report_files: report.report_files,
