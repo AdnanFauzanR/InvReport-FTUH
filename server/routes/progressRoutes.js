@@ -11,7 +11,7 @@ const {
 const { authorizeRoles } = require('../api/users');
 const validate = require('../middleware/validate');
 
-router.post('/add-progress', uploadProgress.single('file'),[
+router.post('/add-progress', uploadProgress.array('files', 5),[
     body('status').notEmpty().withMessage('Status is required'),
     body('report_uuid').notEmpty().withMessage('Report UUID is required'),
     body('description').notEmpty().withMessage('Description is required'),

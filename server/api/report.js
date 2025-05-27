@@ -81,8 +81,11 @@ const addReportHandler = async (req, res) => {
         });
         const progressFolderId = progressFolder.data.id;
 
-        const fileLinks = [];
+        const reportFileLinks = [];
         const progressFileLinks = [];
+        const reportFilenames = [];
+        const progressFilenames = [];
+
 
         // 🏞 Upload files ke reportFolder dan progressFolder
         const isMultiple = req.files.length > 1;
@@ -90,21 +93,26 @@ const addReportHandler = async (req, res) => {
             const file = req.files[i];
             const ext = path.extname(file.originalname);
             const index = isMultiple ? ` ${i + 1}` : '';
-            const filenameReport = `Report${index} - ${reportId}${ext}`;
-            const filenameProgress = `Laporan Masuk${index} - ${reportId}${ext}` 
+            const reportFilename = `Report${index} - ${reportId}${ext}`;
+            const progressFilename = `Laporan Masuk${index} - ${reportId}${ext}` 
 
             // Upload ke reportFolder
-            const uploadedReport = await uploadToDrive(file, reportFolderId, filenameReport);
-            fileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedReport.id}`);
+            const uploadedReport = await uploadToDrive(file, reportFolderId, reportFilename);
+            reportFileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedReport.id}`);
+            reportFilenames.push(reportFilename);
 
             // Upload ke progressFolder dengan penamaan sama
-            const uploadedProgress = await uploadToDrive(file, progressFolderId, filenameProgress);
+            const uploadedProgress = await uploadToDrive(file, progressFolderId, progressFilename);
             progressFileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedProgress.id}`);
+            progressFilenames.push(progressFilename);
         }
 
         // Update file URL di Report
         await Report.update(
-            { report_url: JSON.stringify(fileLinks) },
+            { 
+                report_url: JSON.stringify(reportFileLinks),
+                report_files: JSON.stringify(reportFilenames)
+             },
             { where: { uuid: reportId }, transaction }
         );
 
@@ -114,7 +122,7 @@ const addReportHandler = async (req, res) => {
             report_uuid: reportId,
             status: 'Laporan Masuk',
             description: description,
-            documentation: JSON.stringify(req.files.map(f => f.originalname)),
+            documentation: JSON.stringify(progressFilenames),
             documentation_url: JSON.stringify(progressFileLinks)
         }, { transaction });
 
@@ -123,7 +131,7 @@ const addReportHandler = async (req, res) => {
         res.status(201).json({
             message: 'Report sent successfully',
             report_id: reportId,
-            file_urls: fileLinks,
+            file_urls: reportFileLinks,
             progress_file_urls: progressFileLinks
         });
 
@@ -243,8 +251,8 @@ const getReportsHandler = async (req, res) => {
             longitude: report.longitude,
             date_report: report.created_at,
             date_last_status: progressMap[report.uuid] ? progressMap[report.uuid].date : null,
-            report_files: report.report_files,
-            report_url: report.report_url,
+            report_files: JSON.parse(report.report_files),
+            report_url: JSON.parse(report.report_url),
             ticketing: report.ticket
         }));
 
@@ -261,7 +269,7 @@ const detailReportHandler = async (req, res) => {
         const { uuid, ticket } = req.query;
 
         const queryOptions = {
-            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'priority', 'report_files', 'report_url', 'ticket', 'created_at'],
+            attributes: ['uuid', 'name', 'phone_number', 'location', 'out_room', 'description', 'priority', 'longitude', 'latitude', 'report_files', 'report_url', 'ticket', 'created_at'],
             include: [
                 {
                     model: Building,
@@ -387,47 +395,60 @@ const deleteReportsHandler = async (req, res) => {
         const { uuids } = req.body;
 
         if (uuids && uuids.length > 0) {
-            // Ambil data report sebelum dihapus untuk mendapatkan path file
+            // Ambil data report yang akan dihapus
             const reports = await Report.findAll({
                 where: { uuid: { [Op.in]: uuids } },
-                attributes: ['report_files']
+                attributes: ['uuid']
             });
 
-            // Hapus file jika ada
-            reports.forEach(report => {
-                if (report.report_files && fs.existsSync(report.report_files)) {
-                    try {
-                        fs.unlinkSync(report.report_files);
-                        console.log(`File deleted: ${report.report_files}`);
-                    } catch (err) {
-                        console.error(`Error deleting file: ${report.report_files}`, err);
+            for (const report of reports) {
+                const folderName = `Report - ${report.uuid}`;
+                try {
+                    const res = await drive.files.list({
+                        q: `'${reportsFolderId}' in parents and name='${folderName}' and mimeType='application/vnd.google-apps.folder'`,
+                        fields: 'files(id, name)'
+                    });
+                    const folder = res.data.files[0];
+                    if (folder) {
+                        await deleteFolderAndContents(folder.id);
+                        console.log(`Google Drive folder deleted: ${folderName}`);
+                    } else {
+                        console.log(`Google Drive folder not found: ${folderName}`);
                     }
+                } catch (err) {
+                    console.error(`Error deleting Google Drive folder: ${folderName}`, err);
                 }
-            });
+            }
 
             // Hapus laporan dari database
             await Report.destroy({ where: { uuid: { [Op.in]: uuids } }, cascade: true });
-
             res.status(200).json({ message: 'Reports deleted successfully' });
+
         } else {
             // Jika tidak ada UUID diberikan, hapus semua laporan
-            const reports = await Report.findAll({ attributes: ['report_files'] });
+            const reports = await Report.findAll({ attributes: ['uuid'] });
 
-            // Hapus semua file di folder uploads/reports
-            reports.forEach(report => {
-                if (report.report_files && fs.existsSync(report.report_files)) {
-                    try {
-                        fs.unlinkSync(report.report_files);
-                        console.log(`File deleted: ${report.report_files}`);
-                    } catch (err) {
-                        console.error(`Error deleting file: ${report.report_files}`, err);
+            for (const report of reports) {
+                const folderName = `Report - ${report.uuid}`;
+                try {
+                    const res = await drive.files.list({
+                        q: `'${reportsFolderId}' in parents and name='${folderName}' and mimeType='application/vnd.google-apps.folder'`,
+                        fields: 'files(id, name)'
+                    });
+                    const folder = res.data.files[0];
+                    if (folder) {
+                        await deleteFolderAndContents(folder.id);
+                        console.log(`Google Drive folder deleted: ${folderName}`);
+                    } else {
+                        console.log(`Google Drive folder not found: ${folderName}`);
                     }
+                } catch (err) {
+                    console.error(`Error deleting Google Drive folder: ${folderName}`, err);
                 }
-            });
+            }
 
             // Hapus semua laporan dari database
             await Report.destroy({ where: {}, cascade: true });
-
             res.status(200).json({ message: 'All reports deleted successfully' });
         }
     } catch (error) {
@@ -435,6 +456,7 @@ const deleteReportsHandler = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 };
+
 
 module.exports = {
     uploadReport,
