@@ -69,7 +69,8 @@ const loginHandler = async (req, res) => {
             user: {
                 name: user.name,
                 uuid: user.uuid,
-                division: user.division
+                division: user.division,
+                role: user.role
             },
             dashboard: dashboardRoute
         })
