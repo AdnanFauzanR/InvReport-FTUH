@@ -324,8 +324,8 @@ const detailReportHandler = async (req, res) => {
             priority: report.priority,
             date_report: report.created_at,
             date_last_status: latestProgress ? latestProgress.created_at : null,
-            report_files: report.report_files,
-            report_url: report.report_url,
+            report_files: JSON.parse(report.report_files),
+            report_url: JSON.parse(report.report_url),
             ticketing: report.ticket
         }
 

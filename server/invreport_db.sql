@@ -128,7 +128,7 @@ CREATE TABLE reports (
     ticket VARCHAR(50),
     latitude FLOAT NOT NULL,
     longitude FLOAT NOT NULL,
-    priority priority_enum NOT NULL,
+    priority priority_enum,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT fk_reports_in_room FOREIGN KEY (in_room_uuid) REFERENCES building(uuid) ON DELETE CASCADE,

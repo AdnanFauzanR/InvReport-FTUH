@@ -21,10 +21,6 @@ const loginHandler = async (req, res) => {
 
         const validPassword = await bcrypt.compare(password, user.password);
 
-        console.log('Input Password: ', password);
-        console.log('User Password: ', user.password);
-
-        console.log(validPassword);
         if (!validPassword) {
             return res.status(401).json({ error: 'Invalid Credentials. Missmatch Password' });
         }
