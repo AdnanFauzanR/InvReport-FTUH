@@ -98,12 +98,14 @@ const addReportHandler = async (req, res) => {
 
             // Upload ke reportFolder
             const uploadedReport = await uploadToDrive(file, reportFolderId, reportFilename);
-            reportFileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedReport.id}`);
+            reportFileLinks.push(uploadedReport.webViewLink);
+            // reportFileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedReport.id}`);
             reportFilenames.push(reportFilename);
 
             // Upload ke progressFolder dengan penamaan sama
             const uploadedProgress = await uploadToDrive(file, progressFolderId, progressFilename);
-            progressFileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedProgress.id}`);
+            progressFileLinks.push(uploadedProgress.webViewLink);
+            // progressFileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedProgress.id}`);
             progressFilenames.push(progressFilename);
         }
 

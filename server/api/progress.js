@@ -90,7 +90,8 @@ const addProgressHandler = async (req, res) => {
 
             const uploadedProgress = await uploadToDrive(file, progressFolderId, filename);
             uploadedFileIds.push(uploadedProgress.id); // Simpan ID file yang berhasil diupload
-            fileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedProgress.id}`);
+            fileLinks.push(uploadedProgress.webViewLink);
+            // fileLinks.push(`https://drive.google.com/uc?export=view&id=${uploadedProgress.id}`);
             filenames.push(filename);
         }
 
