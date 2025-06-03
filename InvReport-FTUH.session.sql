@@ -15,4 +15,5 @@
 --     tc.constraint_type = 'FOREIGN KEY'
 --     AND tc.table_name = 'technician_skill';
 -- Ekstensi untuk UUID dan hashing password
-SELECT * FROM progress_inventory_reports;
+ALTER TABLE progress_inventory_reports
+ALTER COLUMN description SET NOT NULL;

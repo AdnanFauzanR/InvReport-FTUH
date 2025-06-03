@@ -20,6 +20,7 @@ const Progress = sequelize.define('Progress', {
     technician_uuid: { type: DataTypes.UUID, allowNull: true},
     external_technician: { type: DataTypes.STRING, allowNull: true},
     description: { type: DataTypes.TEXT, allowNull: false},
+    component: { type: DataTypes.TEXT, allowNull: true},
     documentation: { type: DataTypes.STRING, allowNull: false },
     documentation_url: { type: DataTypes.STRING, allowNull: false}
 },{

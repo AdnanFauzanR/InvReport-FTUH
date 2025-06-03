@@ -24,13 +24,24 @@ const addProgressHandler = async (req, res) => {
     const uploadedFileIds = []; // Untuk menyimpan ID file-file yang berhasil diupload ke Drive
 
     try {
-        const { report_uuid, status, technician_uuid, external_technician, description } = req.body;
+        const { report_uuid, status, technician_uuid, external_technician, description, component } = req.body;
 
         if (!report_uuid) return res.status(400).json({ error: 'Report UUID is required' });
         if (!status) return res.status(400).json({ error: 'Status is required' });
         if (!description) return res.status(400).json({ error: 'Description is required' });
         if (description.length > 1000) return res.status(400).json({ error: 'Description must be less than 1000 characters' });
         if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Image/Video is required' });
+
+        if (status === "Ditunda - Menunggu Persediaan Alat" || status === "Ditunda - Menunggu Persediaan Komponen") {
+            if (!component || component.trim() === '') {
+                return res.status(400).json({ error: 'Component is required for this status' });
+            }
+        } else {
+            if (component && component.trim() !== '') {
+                return res.status(400).json({ error: 'Component should not be provided unless the status is "Ditunda - Menunggu Persediaan Alat" or "Ditunda - Menunggu Persediaan Komponen"' });
+            }
+        }
+
 
         const report = await Report.findOne({ where: { uuid: report_uuid } });
         if (!report) return res.status(404).json({ error: 'Report not found' });
@@ -155,7 +166,7 @@ const getProgressHandler = async (req, res) => {
         const { report_uuid } = req.query;
         
         const queryOptions = {
-            attributes: ['uuid', 'status', 'description', 'external_technician', 'documentation', 'documentation_url', 'created_at'],
+            attributes: ['uuid', 'status', 'description', 'external_technician', 'documentation', 'component', 'documentation_url', 'created_at'],
             include: [
                 {
                     model: Users,
@@ -183,6 +194,7 @@ const getProgressHandler = async (req, res) => {
             status: progress.status,
             technician_name: progress.Technician ? progress.Technician.name : null,
             external_technician: progress.external_technician,
+            component: progress.component,
             description: progress.description,
             documentation: JSON.parse(progress.documentation),
             documentation_url: JSON.parse(progress.documentation_url),
@@ -199,23 +211,47 @@ const getProgressHandler = async (req, res) => {
 const updateProgressHandler = async (req, res) => {
     try {
         const { uuid } = req.params;
-        const { status } = req.body;
+        const { status, component } = req.body;
 
-        if (!status) {
-            return res.status(400).json({ error: 'Status must be selected' });
+        // Ambil data progress yang ada
+        const existingProgress = await Progress.findOne({ where: { uuid } });
+        if (!existingProgress) {
+            return res.status(404).json({ error: 'Progress not found' });
         }
 
-        const updateProgress = await Progress.update(
-            { status: status },
-            { where: { uuid: uuid }}
-        )
+        const isNewStatusWaiting = 
+            status === "Ditunda - Menunggu Persediaan Alat" || 
+            status === "Ditunda - Menunggu Persediaan Komponen";
 
-        res.status(200).json({ message: 'Progress Status Updated Successfully' });
+        const isExistingStatusWaiting = 
+            existingProgress.status === "Ditunda - Menunggu Persediaan Alat" || 
+            existingProgress.status === "Ditunda - Menunggu Persediaan Komponen";
+
+        if (isNewStatusWaiting && (!component || component.trim() === '')) {
+            return res.status(400).json({ error: 'Component is required when delaying due to parts or tools' });
+        } else if (!isNewStatusWaiting && component) {
+            return res.status(400).json({ error: 'Component can only be updated if status is a delay due to parts or tools' })
+        }
+
+        if (!status && (component && component.trim() !== '') && !isExistingStatusWaiting) {
+            return res.status(400).json({ error: 'Component can only be updated if status is a delay due to parts or tools' });
+        }
+
+        const updateFields = {};
+
+        if (status) updateFields.status = status;
+        if (component) updateFields.component = component;
+
+        await Progress.update(updateFields, { where: { uuid } });
+
+        res.status(200).json({ message: 'Progress updated successfully' });
+
     } catch (error) {
-        console.error('Error updating progress status', error);
+        console.error('Error updating progress status:', error);
         res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
-}
+};
+
 
 // Delete Progress Report
 const deleteProgressHandler = async (req, res) => {
